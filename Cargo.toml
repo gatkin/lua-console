@@ -1,0 +1,6 @@
+[package]
+name = "lua-console"
+version = "0.1.0"
+authors = ["gatkin <greg.scott.atkin@gmail.com>"]
+
+[dependencies]
