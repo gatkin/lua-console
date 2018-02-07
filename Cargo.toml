@@ -7,3 +7,4 @@ authors = ["gatkin <greg.scott.atkin@gmail.com>"]
 cc = "1.0"
 
 [dependencies]
+libc = "0.2"
