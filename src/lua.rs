@@ -1,9 +1,9 @@
-#[warn(non_camel_case_types)]
-
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 use libc;
+
+const LUA_MULTRET: c_int = -1;
 
 type lua_State = *mut c_void;
 
@@ -31,12 +31,24 @@ impl LuaState {
     /// by the chunk converted to strings.
     pub fn execute_chunk(&mut self, chunk: &str) -> i32 {
         unsafe {
-            let mut rcode = luaL_loadstring(self.state, chunk.as_ptr() as *const c_char);
+            let mut rcode = self.load_string(chunk);
             if rcode == 0 {
-                rcode = lua_pcallk(self.state, 0, -1, 0, ptr::null_mut(), ptr::null_mut());
+                rcode = lua_pcallk(self.state, 0, LUA_MULTRET, 0, ptr::null_mut(), ptr::null_mut());
             }
 
             rcode
+        }
+    }
+
+    fn load_string(&mut self, chunk: &str) -> i32 {
+        unsafe {
+            luaL_loadbufferx(
+                self.state,
+                chunk.as_ptr() as *const c_char,
+                chunk.len() as libc::size_t,
+                chunk.as_ptr() as *const c_char,
+                ptr::null()
+            )
         }
     }
 }
@@ -53,7 +65,14 @@ type lua_Alloc = unsafe extern "C" fn(ud: *mut c_void, ptr: *mut c_void, osize: 
 type lua_KContext = *mut c_void;
 type lua_KFunction = *mut c_void;
 
-unsafe extern "C" fn allocator(_ud: *mut c_void, ptr: *mut c_void, _osize: usize, nsize: usize) -> *mut c_void {
+unsafe extern "C" fn allocator
+    (
+    _ud: *mut c_void,
+    ptr: *mut c_void,
+    _osize: usize,
+    nsize: usize
+    ) -> *mut c_void
+{
     if nsize == 0 {
         libc::free(ptr as *mut libc::c_void);
         ptr::null_mut()
@@ -81,7 +100,14 @@ extern "C" {
         k: lua_KFunction
         ) -> c_int;
 
-    fn luaL_loadstring(L: *mut lua_State, string: *const c_char) -> c_int;
+    fn luaL_loadbufferx
+        (
+        L: *mut lua_State,
+        buff: *const c_char,
+        size: libc::size_t,
+        name: *const c_char,
+        mode: *const c_char
+        ) -> c_int;
 
     fn luaL_openlibs(L: *mut lua_State);
 }
