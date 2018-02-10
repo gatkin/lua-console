@@ -49,8 +49,12 @@ impl LuaState {
     pub fn execute_chunk(&mut self, chunk: &str) -> i32 {
         unsafe {
             let mut rcode = self.load_string(chunk);
-            if rcode == 0 {
+            if rcode == LUA_OK {
                 rcode = lua_pcall(self.state, 0, LUA_MULTRET, 0);
+            }
+
+            if rcode == LUA_OK {
+                print_stack(self.state);
             }
 
             rcode
@@ -58,15 +62,12 @@ impl LuaState {
     }
 
     fn load_string(&mut self, chunk: &str) -> i32 {
-        unsafe {
-            luaL_loadbufferx(
-                self.state,
-                chunk.as_ptr() as *const c_char,
-                chunk.len() as libc::size_t,
-                chunk.as_ptr() as *const c_char,
-                ptr::null()
-            )
+        let mut rcode = try_add_return(self.state, chunk);
+        if rcode != LUA_OK {
+            rcode = load_string(self.state, chunk);
         }
+
+        rcode
     }
 
     unsafe fn register_print(L: *mut lua_State, io_userdata: *mut c_void) {
@@ -106,7 +107,33 @@ type lua_KContext = *mut c_void;
 type lua_KFunction = *mut c_void;
 type lua_State = *mut c_void;
 
+/// Compiles, but does not execute, the given chunk.
+fn load_string(L: *mut lua_State, chunk: &str) -> c_int {
+    unsafe {
+        luaL_loadbuffer(
+            L,
+            chunk.as_ptr() as *const c_char,
+            chunk.len() as libc::size_t,
+            ptr::null(),
+        )
+    }
+}
 
+/// Prints all values on left on the top of the stack
+unsafe fn print_stack(L: *mut lua_State) {
+    let num_stack_values = lua_gettop(L);
+
+    if num_stack_values > 0 {
+        let print_fn_name = CString::new("print").unwrap();
+        lua_getglobal(L, print_fn_name.as_ptr());
+        lua_insert(L, 1); // Send the print function to the bottom of the stack
+        
+        // Call the print function with all values on the stacks as its arguments
+        lua_pcall(L, num_stack_values, LUA_MULTRET, 0);
+    }
+}
+
+/// Custom print function that replaces the default Lua print function.
 unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
     // Load the printer we saved in the closure
     let io_idx = lua_upvalueindex(1);
@@ -118,7 +145,6 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
     lua_getglobal(L, print_name.as_ptr());
 
     let mut values = Vec::with_capacity(arg_count as usize);
-
     for i in 1 .. arg_count + 1 {
         lua_pushvalue(L, -1); // Push the print function to the top of the stack
         lua_pushvalue(L, i); // Push the ith argument to us to the top
@@ -134,6 +160,20 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
     io.io.on_print(values);
 
     LUA_OK
+}
+
+/// Attempts to turn the given chunk into an expression by adding a "return" in
+/// front of it. Returns the status code from compiling the chunk with a return
+fn try_add_return(L: *mut lua_State, chunk: &str) -> c_int {
+    let mut with_return = String::from("return ");
+    with_return.push_str(chunk);
+    let rcode = load_string(L, &with_return);
+
+    if LUA_OK != rcode {
+        unsafe { lua_pop(L, 1); } // Pop the result from load buffer
+    }
+
+    rcode
 }
 
 #[link(name = "lua5.3")]
@@ -152,6 +192,8 @@ extern "C" {
     fn lua_getglobal(L: *mut lua_State, name: *const c_char) -> c_int;
 
     fn lua_gettop(L: *mut lua_State) -> c_int;
+
+    fn lua_rotate(L: *mut lua_State, index: c_int, n: c_int);
 
     fn lua_pcallk
         (
@@ -197,6 +239,10 @@ unsafe fn lua_call(L: *mut lua_State, n: c_int, r: c_int) {
     lua_callk(L, n, r, ptr::null_mut(), ptr::null_mut());
 }
 
+unsafe fn lua_insert(L: *mut lua_State, idx: c_int) {
+    lua_rotate(L, idx, 1);
+}
+
 unsafe fn lua_pcall(L: *mut lua_State, nargs: c_int, nresults: c_int, errfunc: c_int) -> c_int {
     lua_pcallk(L, nargs, nresults, errfunc, ptr::null_mut(), ptr::null_mut())
 }
@@ -211,4 +257,21 @@ unsafe fn lua_pushglobaltable(L: *mut lua_State) {
 
 fn lua_upvalueindex(i: c_int) -> c_int {
     LUA_REGISTRYINDEX - i
+}
+
+unsafe fn luaL_loadbuffer
+    (
+    L: *mut lua_State,
+    buff: *const c_char,
+    size: libc::size_t,
+    name: *const c_char
+    ) -> c_int
+{
+    luaL_loadbufferx(
+        L,
+        buff,
+        size,
+        name,
+        ptr::null()
+    )
 }
