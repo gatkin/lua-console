@@ -19,6 +19,19 @@ pub trait LuaIO {
     fn on_print(&mut self, values: Vec<String>);
 }
 
+/// Represents errors returned by the Lua.
+#[derive(PartialEq)]
+pub enum LuaRcode {
+    Ok,
+    Yield,
+    ErrRun,
+    ErrSyntax,
+    ErrMem,
+    ErrGcmm,
+    ErrErr,
+    ErrInvalid,
+}
+
 /// Container to hold a reference to a LuaIO trait object. Since trait objects are "fat"
 /// pointers, they cannot be cast between raw C pointers. The IO trait object is used
 /// in standard Lua functions that are defined in Rust so that output can be redirected.
@@ -46,14 +59,14 @@ impl LuaState {
 
     /// Executes the given Lua chunk. Returns all values pushed onto the stack
     /// by the chunk converted to strings.
-    pub fn execute_chunk(&mut self, chunk: &str) -> i32 {
+    pub fn execute_chunk(&mut self, chunk: &str) -> LuaRcode {
         unsafe {
             let mut rcode = self.load_string(chunk);
-            if rcode == LUA_OK {
-                rcode = lua_pcall(self.state, 0, LUA_MULTRET, 0);
+            if rcode == LuaRcode::Ok {
+                rcode = do_loaded_string(self.state);
             }
 
-            if rcode == LUA_OK {
+            if rcode == LuaRcode::Ok {
                 print_stack(self.state);
             }
 
@@ -61,9 +74,9 @@ impl LuaState {
         }
     }
 
-    fn load_string(&mut self, chunk: &str) -> i32 {
+    fn load_string(&mut self, chunk: &str) -> LuaRcode {
         let mut rcode = try_add_return(self.state, chunk);
-        if rcode != LUA_OK {
+        if rcode != LuaRcode::Ok {
             rcode = load_string(self.state, chunk);
         }
 
@@ -95,6 +108,21 @@ impl Drop for LuaState {
     }
 }
 
+impl LuaRcode {
+    fn from_raw_rcode(rcode: c_int) -> LuaRcode {
+        match rcode {
+            0 => LuaRcode::Ok,
+            1 => LuaRcode::Yield,
+            2 => LuaRcode::ErrRun,
+            3 => LuaRcode::ErrSyntax,
+            4 => LuaRcode::ErrMem,
+            5 => LuaRcode::ErrGcmm,
+            6 => LuaRcode::ErrErr,
+            _ => LuaRcode::ErrInvalid,
+        }
+    }
+}
+
 const LUAI_MAXSTACK: c_int = 1000000;
 const LUA_MULTRET: c_int = -1;
 const LUA_OK: c_int = 0;
@@ -107,16 +135,26 @@ type lua_KContext = *mut c_void;
 type lua_KFunction = *mut c_void;
 type lua_State = *mut c_void;
 
+
+
+/// Executes a string that has been loaded and is on the top of the stack.
+fn do_loaded_string(L: *mut lua_State) -> LuaRcode {
+    let rcode = unsafe { lua_pcall(L, 0, LUA_MULTRET, 0) };
+    LuaRcode::from_raw_rcode(rcode)
+}
+
 /// Compiles, but does not execute, the given chunk.
-fn load_string(L: *mut lua_State, chunk: &str) -> c_int {
-    unsafe {
+fn load_string(L: *mut lua_State, chunk: &str) -> LuaRcode {
+    let rcode = unsafe {
         luaL_loadbuffer(
             L,
             chunk.as_ptr() as *const c_char,
             chunk.len() as libc::size_t,
             ptr::null(),
         )
-    }
+    };
+
+    LuaRcode::from_raw_rcode(rcode)
 }
 
 /// Prints all values on left on the top of the stack
@@ -164,12 +202,12 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
 
 /// Attempts to turn the given chunk into an expression by adding a "return" in
 /// front of it. Returns the status code from compiling the chunk with a return
-fn try_add_return(L: *mut lua_State, chunk: &str) -> c_int {
+fn try_add_return(L: *mut lua_State, chunk: &str) -> LuaRcode {
     let mut with_return = String::from("return ");
     with_return.push_str(chunk);
     let rcode = load_string(L, &with_return);
 
-    if LUA_OK != rcode {
+    if LuaRcode::Ok != rcode {
         unsafe { lua_pop(L, 1); } // Pop the result from load buffer
     }
 
