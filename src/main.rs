@@ -1,12 +1,22 @@
 extern crate libc;
 
+mod executor;
 mod lua;
+mod session;
 
 use std::io::{BufRead, Write};
 
+struct LuaConsole;
+
+impl lua::LuaIO for LuaConsole {
+    fn on_print(&mut self, values: Vec<String>) {
+        println!("Receved {:?}", values);
+    }
+}
 
 fn main() {
-    let mut lua_state = lua::LuaState::new();
+    let io = Box::new(LuaConsole);
+    let mut lua_state = lua::LuaState::new(io);
 
     let stdin = std::io::stdin();
 
