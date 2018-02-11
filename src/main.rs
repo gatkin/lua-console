@@ -8,7 +8,7 @@ struct LuaConsole;
 
 impl lua::LuaIO for LuaConsole {
     fn on_print(&mut self, values: Vec<String>) {
-        println!("Receved {:?}", values);
+        println!("Received {:?}", values);
     }
 }
 
