@@ -1,10 +1,8 @@
-extern crate libc;
-
-mod executor;
-mod lua;
-mod session;
+extern crate lua_console;
 
 use std::io::{BufRead, Write};
+
+use lua_console::lua;
 
 struct LuaConsole;
 

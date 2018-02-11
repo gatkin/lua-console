@@ -136,7 +136,6 @@ type lua_KFunction = *mut c_void;
 type lua_State = *mut c_void;
 
 
-
 /// Executes a string that has been loaded and is on the top of the stack.
 fn do_loaded_string(L: *mut lua_State) -> LuaRcode {
     let rcode = unsafe { lua_pcall(L, 0, LUA_MULTRET, 0) };
@@ -184,8 +183,8 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
 
     let mut values = Vec::with_capacity(arg_count as usize);
     for i in 1 .. arg_count + 1 {
-        lua_pushvalue(L, -1); // Push the print function to the top of the stack
-        lua_pushvalue(L, i); // Push the ith argument to us to the top
+        lua_pushvalue(L, -1); // Push the tostring function to the top of the stack
+        lua_pushvalue(L, i); // Push the ith argument passed to us to the top
         lua_call(L, 1, 1);
 
         let raw_value = lua_tolstring(L, -1, ptr::null_mut());
