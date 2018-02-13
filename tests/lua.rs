@@ -27,82 +27,105 @@ impl lua::LuaIO for IOReceiver {
 }
 
 
-fn create_io_reciver() -> Rc<RefCell<IOReceiver>> {
-    Rc::new(RefCell::new(IOReceiver::new()))
+struct TestCase {
+    chunks: Vec<&'static str>,
+    expected_print_values: Vec<&'static str>
+}
+
+
+impl TestCase {
+    fn run(&self) {
+        let io_receiver = Rc::new(RefCell::new(IOReceiver::new()));
+        let lua_state = lua::LuaState::new(io_receiver.clone());
+
+        for chunk in &self.chunks {
+            let rcode = lua_state.execute_chunk(chunk);
+            assert_eq!(lua::LuaRcode::Ok, rcode);
+        }
+
+        assert_eq!(self.expected_print_values, io_receiver.borrow().values);
+    }
 }
 
 
 #[test]
 fn leftover_stack_values_printed() {
-    let io_receiver = create_io_reciver();
-    let lua_state = lua::LuaState::new(io_receiver);
-
-    let rcode = lua_state.execute_chunk("give_two = function() return 5, true end");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let rcode = lua_state.execute_chunk("give_two()");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let expected_values = vec!["5", "true"];
+    let test_case = TestCase {
+        chunks: vec![
+            "give_two = function() return 5, true end",
+            "give_two()",
+        ],
+        expected_print_values: vec![
+            "5",
+            "true",
+        ],
+    };
+    
+    test_case.run();
 }
 
 
 #[test]
 fn print_local_vars() {
-    let io_receiver = create_io_reciver();
-    let lua_state = lua::LuaState::new(io_receiver.clone());
+    let test_case = TestCase {
+        chunks: vec![
+            "x = 5",
+            "print(x)",
+        ],
+        expected_print_values: vec![
+            "5",
+        ],
+    };
     
-    let rcode = lua_state.execute_chunk("x = 5");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let rcode = lua_state.execute_chunk("print(x)");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let expected_values = vec!["5"];
-    assert_eq!(expected_values, io_receiver.borrow().values);
+    test_case.run();
 }
 
 
 #[test]
 fn print_many_values() {
-    let io_receiver = create_io_reciver();
-    let lua_state = lua::LuaState::new(io_receiver.clone());
-
-    let rcode = lua_state.execute_chunk("print('a', 5, false, nil)");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let expected_values = vec!["a", "5", "false", "nil"];
-    assert_eq!(expected_values, io_receiver.borrow().values);
+    let test_case = TestCase {
+        chunks: vec![
+            "print('a', 5, false, nil)",
+        ],
+        expected_print_values: vec![
+            "a",
+            "5",
+            "false",
+            "nil",
+        ],
+    };
+    
+    test_case.run();
 }
 
 
 #[test]
 fn print_single_value() {
-    let io_receiver = create_io_reciver();
-    let lua_state = lua::LuaState::new(io_receiver.clone());
+    let test_case = TestCase {
+        chunks: vec![
+            "print('Hello, World!')",
+        ],
+        expected_print_values: vec![
+            "Hello, World!",
+        ],
+    };
     
-    let rcode = lua_state.execute_chunk("print('Hello, World!')");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let expected_values = vec!["Hello, World!"];
-    assert_eq!(expected_values, io_receiver.borrow().values);
+    test_case.run();
 }
 
 
 #[test]
 fn use_standard_module() {
-    let io_receiver = create_io_reciver();
-    let lua_state = lua::LuaState::new(io_receiver.clone());
-
-    let rcode = lua_state.execute_chunk("t = {}");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let rcode = lua_state.execute_chunk("table.insert(t, 17)");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let rcode = lua_state.execute_chunk("print(t[1])");
-    assert_eq!(lua::LuaRcode::Ok, rcode);
-
-    let expected_values = vec!["17"];
-    assert_eq!(expected_values, io_receiver.borrow().values);
+    let test_case = TestCase {
+        chunks: vec![
+            "t = {}",
+            "table.insert(t, 17)",
+            "print(t[1])",
+        ],
+        expected_print_values: vec![
+            "17",
+        ],
+    };
+    
+    test_case.run();
 }
