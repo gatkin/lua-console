@@ -1,9 +1,11 @@
 #![allow(non_snake_case)]
 mod ffi;
 
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
+use std::rc::Rc;
 
 use libc;
 
@@ -11,7 +13,7 @@ use lua::ffi::*;
 
 
 /// Represents errors returned by the Lua.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum LuaRcode {
     Ok,
     Yield,
@@ -48,14 +50,14 @@ pub struct LuaState {
 /// be cast between raw C pointers. Therefore, the IO receiver is placed into a container which we
 /// can then access in the print function as one of the function's up values.
 struct LuaIOContainer {
-    io: Box<LuaIO>,
+    io: Rc<RefCell<LuaIO>>,
 }
 
 
 impl LuaState {
     /// Creates and configures a new Lua state that can be used to execute
     /// Lua chunks.
-    pub fn new(io: Box<LuaIO>) -> LuaState {
+    pub fn new(io: Rc<RefCell<LuaIO>>) -> LuaState {
         let state = unsafe{ luaL_newstate() };
         unsafe{ luaL_openlibs(state) };
 
@@ -70,7 +72,7 @@ impl LuaState {
     }
 
     /// Executes the given Lua chunk.
-    pub fn execute_chunk(&mut self, chunk: &str) -> LuaRcode {
+    pub fn execute_chunk(&self, chunk: &str) -> LuaRcode {
         let mut rcode = compile_chunk(self.state, chunk);
         if rcode == LuaRcode::Ok {
             rcode = execute_compiled_chunk(self.state);
@@ -174,7 +176,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
         lua_pop(L, 1); // Remove the value from the stack
     }
 
-    io.io.on_print(values);
+    io.io.borrow_mut().on_print(values);
 
     LUA_OK
 }

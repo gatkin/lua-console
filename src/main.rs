@@ -1,6 +1,8 @@
 extern crate lua_console;
 
+use std::cell::RefCell;
 use std::io::{BufRead, Write};
+use std::rc::Rc;
 
 use lua_console::lua;
 
@@ -13,8 +15,8 @@ impl lua::LuaIO for LuaConsole {
 }
 
 fn main() {
-    let io = Box::new(LuaConsole);
-    let mut lua_state = lua::LuaState::new(io);
+    let io = Rc::new(RefCell::new(LuaConsole));
+    let lua_state = lua::LuaState::new(io.clone());
 
     let stdin = std::io::stdin();
 
