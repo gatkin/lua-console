@@ -55,6 +55,8 @@ extern "C" {
 
     pub fn lua_pushlightuserdata(L: *mut lua_State, p: *mut c_void);
 
+    pub fn lua_pushnil(L: *mut lua_State);
+
     pub fn lua_pushvalue(L: *mut lua_State, idx: c_int);
 
     pub fn lua_rawgeti(L: *mut lua_State, idx: c_int, n: lua_Integer) -> c_int;

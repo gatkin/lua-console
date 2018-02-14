@@ -1,11 +1,9 @@
 #![allow(non_snake_case)]
 mod ffi;
 
-use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
-use std::rc::Rc;
 
 use libc;
 
@@ -37,7 +35,6 @@ pub trait LuaIO {
 /// Lua C API.
 pub struct LuaState {
     state: *mut lua_State,
-    io: *mut LuaIOContainer,
 }
 
 
@@ -49,31 +46,30 @@ pub struct LuaState {
 /// as an up-value to the custom print function. Since trait objects are "fat" pointers, they cannot
 /// be cast between raw C pointers. Therefore, the IO receiver is placed into a container which we
 /// can then access in the print function as one of the function's up values.
-struct LuaIOContainer {
-    io: Rc<RefCell<LuaIO>>,
+struct LuaIOContainer<'a> {
+    io: &'a mut LuaIO,
 }
 
 
 impl LuaState {
     /// Creates and configures a new Lua state that can be used to execute
     /// Lua chunks.
-    pub fn new(io: Rc<RefCell<LuaIO>>) -> LuaState {
+    pub fn new() -> LuaState {
         let state = unsafe{ luaL_newstate() };
         unsafe{ luaL_openlibs(state) };
 
-        // Make a raw pointer to the IO receiver avilable to our custom print function.
-        let io_container = Box::into_raw(Box::new(LuaIOContainer{ io }));
-        unsafe{ register_print(state, io_container as *mut c_void); }
-
         LuaState{
             state,
-            io: io_container,
         }
     }
 
     /// Executes the given Lua chunk.
-    pub fn execute_chunk(&self, chunk: &str) -> LuaRcode {
+    pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> LuaRcode {
+        let io_container = Box::into_raw(Box::new(LuaIOContainer{ io }));
+        unsafe{ register_print(self.state, io_container as *mut c_void); }
+        
         let mut rcode = compile_chunk(self.state, chunk);
+
         if rcode == LuaRcode::Ok {
             rcode = execute_compiled_chunk(self.state);
         }
@@ -81,6 +77,12 @@ impl LuaState {
         if rcode == LuaRcode::Ok {
             unsafe{ print_stack(self.state); }
         }
+
+        // For safety, unregister the print function which holds a raw reference
+        // to the io receiver trait object we are borrowing
+        unsafe{ unregister_print(self.state); }
+
+        let _io_container = unsafe { Box::from_raw(io_container) };
 
         rcode
     }
@@ -91,7 +93,6 @@ impl Drop for LuaState {
     fn drop(&mut self) {
         unsafe {
             lua_close(self.state);
-            let _io = Box::from_raw(self.io);
         }
     }
 }
@@ -176,7 +177,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
         lua_pop(L, 1); // Remove the value from the stack
     }
 
-    io.io.borrow_mut().on_print(values);
+    io.io.on_print(values);
 
     LUA_OK
 }
@@ -228,4 +229,17 @@ fn try_add_return(L: *mut lua_State, chunk: &str) -> LuaRcode {
     }
 
     rcode
+}
+
+
+/// Unregisters the print function.
+unsafe fn unregister_print(L: *mut lua_State) {
+    // Set the global print functino to nil
+    lua_pushglobaltable(L);
+    lua_pushnil(L);
+    
+    let name = CString::new("print").unwrap();
+    lua_setfield(L, -2, name.as_ptr());
+
+    lua_pop(L, 1); // Remove the global table from the stack
 }

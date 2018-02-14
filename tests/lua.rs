@@ -1,8 +1,5 @@
 extern crate lua_console;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use lua_console::lua;
 
 
@@ -35,15 +32,15 @@ struct TestCase {
 
 impl TestCase {
     fn run(&self) {
-        let io_receiver = Rc::new(RefCell::new(IOReceiver::new()));
-        let lua_state = lua::LuaState::new(io_receiver.clone());
+        let mut io_receiver = IOReceiver::new();
+        let lua_state = lua::LuaState::new();
 
         for chunk in &self.chunks {
-            let rcode = lua_state.execute_chunk(chunk);
+            let rcode = lua_state.execute_chunk(chunk, &mut io_receiver);
             assert_eq!(lua::LuaRcode::Ok, rcode);
         }
 
-        assert_eq!(self.expected_print_values, io_receiver.borrow().values);
+        assert_eq!(self.expected_print_values, io_receiver.values);
     }
 }
 
