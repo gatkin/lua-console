@@ -46,8 +46,15 @@ pub struct LuaState {
 /// as an up-value to the custom print function. Since trait objects are "fat" pointers, they cannot
 /// be cast between raw C pointers. Therefore, the IO receiver is placed into a container which we
 /// can then access in the print function as one of the function's up values.
-struct LuaIOContainer<'a> {
+struct LuaIOBox<'a> {
     io: &'a mut LuaIO,
+}
+
+/// Handle to provide RAII semantics for managing the registration and unregistration of IO
+/// receivers with the Lua run time.
+struct IORegistrationHandle<'a> {
+    io: *mut LuaIOBox<'a>,
+    L: *mut lua_State,
 }
 
 
@@ -65,8 +72,7 @@ impl LuaState {
 
     /// Executes the given Lua chunk.
     pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> LuaRcode {
-        let io_container = Box::into_raw(Box::new(LuaIOContainer{ io }));
-        unsafe{ register_print(self.state, io_container as *mut c_void); }
+        let _io_handle = IORegistrationHandle::new(self.state, io);
         
         let mut rcode = compile_chunk(self.state, chunk);
 
@@ -77,12 +83,6 @@ impl LuaState {
         if rcode == LuaRcode::Ok {
             unsafe{ print_stack(self.state); }
         }
-
-        // For safety, unregister the print function which holds a raw reference
-        // to the io receiver trait object we are borrowing
-        unsafe{ unregister_print(self.state); }
-
-        let _io_container = unsafe { Box::from_raw(io_container) };
 
         rcode
     }
@@ -111,6 +111,29 @@ impl LuaRcode {
             6 => LuaRcode::ErrErr,
             _ => LuaRcode::ErrInvalid,
         }
+    }
+}
+
+
+impl<'a> IORegistrationHandle<'a> {
+    fn new(L: *mut lua_State, io: &'a mut LuaIO) -> IORegistrationHandle<'a> {
+        let io_ptr = Box::into_raw(Box::new(LuaIOBox{ io }));
+        unsafe{ register_print(L, io_ptr as *mut c_void); }
+
+        IORegistrationHandle{
+            io: io_ptr,
+            L,
+        }
+    }
+}
+
+
+impl<'a> Drop for IORegistrationHandle<'a> {
+    fn drop(&mut self) {
+        // For safety, unregister the print function which holds a raw reference to the
+        // IO receiver trait object.
+        unsafe{ unregister_print(self.L); }
+        let _io_container = unsafe{ Box::from_raw(self.io) };
     }
 }
 
@@ -155,7 +178,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
     // Load the printer we saved in this function's closure
     let io_idx = lua_upvalueindex(1);
     let raw_io_ptr = lua_touserdata(L, io_idx);
-    let io = &mut *(raw_io_ptr as *mut LuaIOContainer);
+    let io_box = &mut *(raw_io_ptr as *mut LuaIOBox);
     
     // Push the tostring function to the top of the stack so we can convert all of 
     // our arguments to strings.
@@ -177,7 +200,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
         lua_pop(L, 1); // Remove the value from the stack
     }
 
-    io.io.on_print(values);
+    io_box.io.on_print(values);
 
     LUA_OK
 }
