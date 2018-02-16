@@ -24,8 +24,14 @@ impl lua::LuaIO for IOReceiver {
 }
 
 
+struct TestChunk {
+    chunk: &'static str,
+    expected_return_values: Vec<&'static str>
+}
+
+
 struct TestCase {
-    chunks: Vec<&'static str>,
+    chunks: Vec<TestChunk>,
     expected_print_values: Vec<&'static str>
 }
 
@@ -36,8 +42,8 @@ impl TestCase {
         let lua_state = lua::LuaState::new();
 
         for chunk in &self.chunks {
-            let rcode = lua_state.execute_chunk(chunk, &mut io_receiver);
-            assert_eq!(lua::LuaRcode::Ok, rcode);
+            let result = lua_state.execute_chunk(chunk.chunk, &mut io_receiver);
+            assert_eq!(result.unwrap(), chunk.expected_return_values);
         }
 
         assert_eq!(self.expected_print_values, io_receiver.values);
@@ -46,16 +52,27 @@ impl TestCase {
 
 
 #[test]
-fn leftover_stack_values_printed() {
+fn leftover_stack_values_returned() {
     let test_case = TestCase {
         chunks: vec![
-            "give_two = function() return 5, true end",
-            "give_two()",
+            TestChunk{
+                chunk: "give_two = function() return 5, true end",
+                expected_return_values: vec![],
+            },
+            TestChunk{
+                chunk: "give_two()",
+                expected_return_values: vec!["5", "true"],
+            },
+            TestChunk{
+                chunk: "x = 5",
+                expected_return_values: vec![],
+            },
+            TestChunk{
+                chunk: "x",
+                expected_return_values: vec!["5"],
+            },
         ],
-        expected_print_values: vec![
-            "5",
-            "true",
-        ],
+        expected_print_values: vec![],
     };
     
     test_case.run();
@@ -66,8 +83,14 @@ fn leftover_stack_values_printed() {
 fn print_local_vars() {
     let test_case = TestCase {
         chunks: vec![
-            "x = 5",
-            "print(x)",
+            TestChunk{
+                chunk: "x = 5",
+                expected_return_values: vec![],
+            },
+            TestChunk{
+                chunk: "print(x)",
+                expected_return_values: vec![],
+            },
         ],
         expected_print_values: vec![
             "5",
@@ -82,7 +105,10 @@ fn print_local_vars() {
 fn print_many_values() {
     let test_case = TestCase {
         chunks: vec![
-            "print('a', 5, false, nil)",
+            TestChunk{
+                chunk: "print('a', 5, false, nil)",
+                expected_return_values: vec![],
+            },
         ],
         expected_print_values: vec![
             "a",
@@ -100,7 +126,10 @@ fn print_many_values() {
 fn print_single_value() {
     let test_case = TestCase {
         chunks: vec![
-            "print('Hello, World!')",
+            TestChunk{
+                chunk: "print('Hello, World!')",
+                expected_return_values: vec![],
+            },
         ],
         expected_print_values: vec![
             "Hello, World!",
@@ -115,9 +144,18 @@ fn print_single_value() {
 fn use_standard_module() {
     let test_case = TestCase {
         chunks: vec![
-            "t = {}",
-            "table.insert(t, 17)",
-            "print(t[1])",
+            TestChunk{
+                chunk: "t = {}",
+                expected_return_values: vec![],
+            },
+            TestChunk{
+                chunk: "table.insert(t, 17)",
+                expected_return_values: vec![],
+            },
+            TestChunk{
+                chunk: "print(t[1])",
+                expected_return_values: vec![],
+            },
         ],
         expected_print_values: vec![
             "17",

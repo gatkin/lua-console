@@ -70,10 +70,12 @@ impl LuaState {
         }
     }
 
-    /// Executes the given Lua chunk.
-    pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> LuaRcode {
+    /// Executes the given Lua chunk, and returns any values left on the stack converted to
+    /// their string representations.
+    pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> Result<Vec<String>, LuaRcode> {
         let _io_handle = IORegistrationHandle::new(self.state, io);
         
+        let initial_stack = unsafe{ lua_gettop(self.state) };
         let mut rcode = compile_chunk(self.state, chunk);
 
         if rcode == LuaRcode::Ok {
@@ -81,10 +83,18 @@ impl LuaState {
         }
 
         if rcode == LuaRcode::Ok {
-            unsafe{ print_stack(self.state); }
-        }
+            let num_returned_values = unsafe{ lua_gettop( self.state ) } - initial_stack;
+            let stack_values = unsafe{ dump_stack(self.state, num_returned_values) };
 
-        rcode
+            // Remove all of the values left on the stack after executing the chunk as
+            // well as the function representing the executed chunk.
+            unsafe{ lua_pop(self.state, num_returned_values + 1) };
+
+            Ok(stack_values)
+        } else {
+            unsafe{ lua_pop(self.state, 1) }; // Pop the error message. TODO: Return the error message
+            Err(rcode)
+        }
     }
 }
 
@@ -180,14 +190,21 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
     let raw_io_ptr = lua_touserdata(L, io_idx);
     let io_box = &mut *(raw_io_ptr as *mut LuaIOBox);
     
-    // Push the tostring function to the top of the stack so we can convert all of 
-    // our arguments to strings.
-    let arg_count = lua_gettop(L);
-    let print_name = CString::new("tostring").unwrap();
-    lua_getglobal(L, print_name.as_ptr());
+    let num_params = lua_gettop(L);
+    let values = dump_stack(L, num_params);
+    io_box.io.on_print(values);
 
-    let mut values = Vec::with_capacity(arg_count as usize);
-    for i in 1 .. arg_count + 1 {
+    LUA_OK
+}
+
+
+/// Extracts the specified number of values from the top of the stack
+unsafe fn dump_stack(L: *mut lua_State, num_values: i32) -> Vec<String> {
+    let to_string_name = CString::new("tostring").unwrap();
+    lua_getglobal(L, to_string_name.as_ptr());
+
+    let mut values = Vec::with_capacity(num_values as usize);
+    for i in 1 .. num_values + 1 {
         lua_pushvalue(L, -1); // Push the tostring function to the top of the stack
         lua_pushvalue(L, i); // Push the ith argument passed to us to the top
         lua_call(L, 1, 1);
@@ -200,24 +217,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
         lua_pop(L, 1); // Remove the value from the stack
     }
 
-    io_box.io.on_print(values);
-
-    LUA_OK
-}
-
-
-/// Prints all values on left on the top of the stack
-unsafe fn print_stack(L: *mut lua_State) {
-    let num_stack_values = lua_gettop(L);
-
-    if num_stack_values > 0 {
-        let print_fn_name = CString::new("print").unwrap();
-        lua_getglobal(L, print_fn_name.as_ptr());
-        lua_insert(L, 1); // Send the print function to the bottom of the stack
-        
-        // Call the print function with all values on the stacks as its arguments
-        lua_pcall(L, num_stack_values, LUA_MULTRET, 0);
-    }
+    values
 }
 
 

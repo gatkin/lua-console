@@ -8,7 +8,11 @@ struct LuaConsole;
 
 impl lua::LuaIO for LuaConsole {
     fn on_print(&mut self, values: Vec<String>) {
-        println!("Received {:?}", values);
+        for value in &values {
+            print!("{}", value);
+        }
+
+        println!("");
     }
 }
 
@@ -20,8 +24,22 @@ fn main() {
 
     show_prompt();
     for line in stdin.lock().lines() {
-        lua_state.execute_chunk(&line.unwrap(), &mut io);
+        match lua_state.execute_chunk(&line.unwrap(), &mut io) {
+            Err(rcode) => println!("Error {:?}", rcode),
+            Ok(ref values) => print_return_values(values),
+        };
+        
         show_prompt();
+    }
+}
+
+fn print_return_values(values: &Vec<String>) {
+    for value in values {
+        print!("{}  ", value);
+    }
+
+    if values.len() > 0 {
+        println!("");
     }
 }
 

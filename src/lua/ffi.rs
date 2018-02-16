@@ -39,8 +39,6 @@ extern "C" {
 
     pub fn lua_gettop(L: *mut lua_State) -> c_int;
 
-    pub fn lua_rotate(L: *mut lua_State, index: c_int, n: c_int);
-
     pub fn lua_pcallk
         (
         L: *mut lua_State,
@@ -85,10 +83,6 @@ extern "C" {
 
 pub unsafe fn lua_call(L: *mut lua_State, n: c_int, r: c_int) {
     lua_callk(L, n, r, ptr::null_mut(), ptr::null_mut());
-}
-
-pub unsafe fn lua_insert(L: *mut lua_State, idx: c_int) {
-    lua_rotate(L, idx, 1);
 }
 
 pub unsafe fn lua_pcall(L: *mut lua_State, nargs: c_int, nresults: c_int, errfunc: c_int) -> c_int {
