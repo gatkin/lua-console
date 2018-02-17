@@ -10,7 +10,7 @@ use libc;
 use lua::ffi::*;
 
 
-/// Represents errors returned by the Lua.
+/// Status codes returned by the Lua virtual machine.
 #[derive(PartialEq, Debug)]
 pub enum LuaRcode {
     Ok,
@@ -21,6 +21,16 @@ pub enum LuaRcode {
     ErrGcmm,
     ErrErr,
     ErrInvalid,
+}
+
+
+/// Possible errors with compiling and executing Lua chunks
+#[derive(PartialEq, Debug)]
+pub enum LuaErrorStatus {
+    Yield,
+    RuntimeError,
+    SyntaxError,
+    InternalError,
 }
 
 
@@ -35,6 +45,14 @@ pub trait LuaIO {
 /// Lua C API.
 pub struct LuaState {
     state: *mut lua_State,
+}
+
+
+/// Represents errors executing and compiling Lua chunks.
+#[derive(PartialEq, Debug)]
+pub struct LuaError {
+    status: LuaErrorStatus,
+    message: Option<String>,
 }
 
 
@@ -72,7 +90,7 @@ impl LuaState {
 
     /// Executes the given Lua chunk, and returns any values left on the stack converted to
     /// their string representations.
-    pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> Result<Vec<String>, LuaRcode> {
+    pub fn execute_chunk(&self, chunk: &str, io: &mut LuaIO) -> Result<Vec<String>, LuaError> {
         let _io_handle = IORegistrationHandle::new(self.state, io);
         
         let initial_stack = unsafe{ lua_gettop(self.state) };
@@ -82,19 +100,22 @@ impl LuaState {
             rcode = execute_compiled_chunk(self.state);
         }
 
-        if rcode == LuaRcode::Ok {
-            let num_returned_values = unsafe{ lua_gettop( self.state ) } - initial_stack;
-            let stack_values = unsafe{ dump_stack(self.state, num_returned_values) };
+        let num_stack_values = unsafe{ lua_gettop(self.state) } - initial_stack;
 
-            // Remove all of the values left on the stack after executing the chunk as
-            // well as the function representing the executed chunk.
-            unsafe{ lua_pop(self.state, num_returned_values + 1) };
+        let exctn_result = if rcode == LuaRcode::Ok {
+            let stack_values = unsafe{ dump_stack(self.state, num_stack_values) };
+
+            // Remove all of the returned values and the compiled chunk from the stack.
+            unsafe{ lua_pop(self.state, num_stack_values + 1) };
 
             Ok(stack_values)
         } else {
-            unsafe{ lua_pop(self.state, 1) }; // Pop the error message. TODO: Return the error message
-            Err(rcode)
-        }
+            let error = unsafe{ get_execution_error(self.state, initial_stack, rcode) };
+            unsafe{ lua_pop(self.state, num_stack_values) };
+            Err(error)
+        };
+
+        exctn_result
     }
 }
 
@@ -200,8 +221,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
 
 /// Extracts the specified number of values from the top of the stack
 unsafe fn dump_stack(L: *mut lua_State, num_values: i32) -> Vec<String> {
-    let to_string_name = CString::new("tostring").unwrap();
-    lua_getglobal(L, to_string_name.as_ptr());
+    push_global(L, "tostring");
 
     let mut values = Vec::with_capacity(num_values as usize);
     for i in 1 .. num_values + 1 {
@@ -209,15 +229,56 @@ unsafe fn dump_stack(L: *mut lua_State, num_values: i32) -> Vec<String> {
         lua_pushvalue(L, i); // Push the ith argument passed to us to the top
         lua_call(L, 1, 1);
 
-        // Get the converted string value.
-        let raw_value = lua_tolstring(L, -1, ptr::null_mut());
-        let value = String::from(CStr::from_ptr(raw_value).to_str().unwrap());
+        let value = stack_top_to_string(L);
         values.push(value);
 
         lua_pop(L, 1); // Remove the value from the stack
     }
 
     values
+}
+
+
+/// Retrives the value at the top of the stack and converts it to a string representation.
+unsafe fn dump_stack_top(L: *mut lua_State) -> String {
+    push_global(L, "tostring");
+    lua_pushvalue(L, -2);
+    lua_call(L, 1, 1);
+    let value = stack_top_to_string(L);
+
+    lua_pop(L, 1);
+
+    value
+}
+
+
+/// Retrieves all error information from the stack after an error is encountered in either the compiliation
+/// or execution of a chunk.
+unsafe fn get_execution_error(L: *mut lua_State, num_stack_values: i32, rcode: LuaRcode) -> LuaError {
+    let error_msg = if num_stack_values > 0 {
+        Some(dump_stack_top(L))
+    } else {
+        None
+    };
+
+    let error_status = match rcode {
+        LuaRcode::Yield => LuaErrorStatus::Yield,
+        LuaRcode::ErrSyntax => LuaErrorStatus::SyntaxError,
+        LuaRcode::ErrRun => LuaErrorStatus::RuntimeError,
+        _ => LuaErrorStatus::InternalError,
+    };
+
+    LuaError {
+        status: error_status,
+        message: error_msg,
+    }
+}
+
+
+/// Pushes the given global identifier to the top of the stack.
+unsafe fn push_global(L: *mut lua_State, name: &str) {
+    let to_string_name = CString::new(name).unwrap();
+    lua_getglobal(L, to_string_name.as_ptr());
 }
 
 
@@ -237,6 +298,13 @@ unsafe fn register_print(L: *mut lua_State, io_userdata: *mut c_void) {
     lua_setfield(L, -2, name.as_ptr());
 
     lua_pop(L, 1); // Pop the global table from the stack
+}
+
+
+/// Retrieves the string from the top of the stack.
+unsafe fn stack_top_to_string(L: *mut lua_State) -> String {
+    let raw_value = lua_tolstring(L, -1, ptr::null_mut());
+    String::from(CStr::from_ptr(raw_value).to_str().unwrap())
 }
 
 
