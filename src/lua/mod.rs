@@ -52,7 +52,7 @@ pub struct LuaState {
 #[derive(PartialEq, Debug)]
 pub struct LuaError {
     status: LuaErrorStatus,
-    message: Option<String>,
+    message: String,
 }
 
 
@@ -97,7 +97,7 @@ impl LuaState {
         let mut rcode = compile_chunk(self.state, chunk);
 
         if rcode == LuaRcode::Ok {
-            rcode = execute_compiled_chunk(self.state);
+            rcode = unsafe{ execute_compiled_chunk(self.state) };
         }
 
         let num_stack_values = unsafe{ lua_gettop(self.state) } - initial_stack;
@@ -107,10 +107,9 @@ impl LuaState {
 
             // Remove all of the returned values and the compiled chunk from the stack.
             unsafe{ lua_pop(self.state, num_stack_values + 1) };
-
             Ok(stack_values)
         } else {
-            let error = unsafe{ get_execution_error(self.state, initial_stack, rcode) };
+            let error = unsafe{ get_execution_error(self.state, rcode) };
             unsafe{ lua_pop(self.state, num_stack_values) };
             Err(error)
         };
@@ -182,8 +181,14 @@ fn compile_chunk(L: *mut lua_State, chunk: &str) -> LuaRcode {
 
 
 /// Executes a chunk that has been compiled and is on the top of the stack.
-fn execute_compiled_chunk(L: *mut lua_State) -> LuaRcode {
-    let rcode = unsafe { lua_pcall(L, 0, LUA_MULTRET, 0) };
+unsafe fn execute_compiled_chunk(L: *mut lua_State) -> LuaRcode {
+    let base = lua_gettop(L);
+    lua_pushcfunction(L, message_handler);
+    lua_insert(L, base); // Push our message handler under the function to call
+
+    let rcode = lua_pcall(L, 0, LUA_MULTRET, base);
+    lua_remove(L, base); // Remove the message handler from the stack
+
     LuaRcode::from_raw_rcode(rcode)
 }
 
@@ -200,22 +205,6 @@ fn load_string(L: *mut lua_State, chunk: &str) -> LuaRcode {
     };
 
     LuaRcode::from_raw_rcode(rcode)
-}
-
-
-/// Custom print function that replaces the default Lua print function. This is invoked from the
-/// Lua library C code whenver the Lua function print is called.
-unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
-    // Load the printer we saved in this function's closure
-    let io_idx = lua_upvalueindex(1);
-    let raw_io_ptr = lua_touserdata(L, io_idx);
-    let io_box = &mut *(raw_io_ptr as *mut LuaIOBox);
-    
-    let num_params = lua_gettop(L);
-    let values = dump_stack(L, num_params);
-    io_box.io.on_print(values);
-
-    LUA_OK
 }
 
 
@@ -254,12 +243,7 @@ unsafe fn dump_stack_top(L: *mut lua_State) -> String {
 
 /// Retrieves all error information from the stack after an error is encountered in either the compiliation
 /// or execution of a chunk.
-unsafe fn get_execution_error(L: *mut lua_State, num_stack_values: i32, rcode: LuaRcode) -> LuaError {
-    let error_msg = if num_stack_values > 0 {
-        Some(dump_stack_top(L))
-    } else {
-        None
-    };
+unsafe fn get_execution_error(L: *mut lua_State, rcode: LuaRcode) -> LuaError {
 
     let error_status = match rcode {
         LuaRcode::Yield => LuaErrorStatus::Yield,
@@ -270,8 +254,17 @@ unsafe fn get_execution_error(L: *mut lua_State, num_stack_values: i32, rcode: L
 
     LuaError {
         status: error_status,
-        message: error_msg,
+        message: dump_stack_top(L),
     }
+}
+
+
+/// Custom message handler invoked by the Lua runtime whenever an error is encountered
+/// executing a chunk.
+unsafe extern "C" fn message_handler(L: *mut lua_State) -> c_int {
+    let msg = lua_tolstring(L, 1, ptr::null_mut());
+    luaL_traceback(L, L, msg, 1); // Append a traceback to the message
+    LUA_ERRUN
 }
 
 
@@ -298,6 +291,22 @@ unsafe fn register_print(L: *mut lua_State, io_userdata: *mut c_void) {
     lua_setfield(L, -2, name.as_ptr());
 
     lua_pop(L, 1); // Pop the global table from the stack
+}
+
+
+/// Custom print function that replaces the default Lua print function. This is invoked from the
+/// Lua library C code whenver the Lua function print is called.
+unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
+    // Load the printer we saved in this function's closure
+    let io_idx = lua_upvalueindex(1);
+    let raw_io_ptr = lua_touserdata(L, io_idx);
+    let io_box = &mut *(raw_io_ptr as *mut LuaIOBox);
+    
+    let num_params = lua_gettop(L);
+    let values = dump_stack(L, num_params);
+    io_box.io.on_print(values);
+
+    LUA_OK
 }
 
 
