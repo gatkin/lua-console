@@ -1,4 +1,8 @@
 language: rust
+script:
+  - git submodule update --init --recursive
+  - cargo build --verbose
+  - cargo test --verbose
 rust:
   - stable
   - beta
