@@ -43,11 +43,28 @@ impl TestCase {
 
         for chunk in &self.chunks {
             let result = lua_state.execute_chunk(chunk.chunk, &mut io_receiver);
+            assert!(result.is_ok());
             assert_eq!(result.unwrap(), chunk.expected_return_values);
         }
 
         assert_eq!(self.expected_print_values, io_receiver.values);
     }
+}
+
+
+#[test]
+fn explicit_return() {
+    let test_case = TestCase{
+        chunks: vec![
+            TestChunk{
+                chunk: "return 17, false",
+                expected_return_values: vec!["17", "false"],
+            }
+        ],
+        expected_print_values: vec![],
+    };
+
+    test_case.run();
 }
 
 
@@ -71,6 +88,10 @@ fn leftover_stack_values_returned() {
                 chunk: "x",
                 expected_return_values: vec!["5"],
             },
+            TestChunk{
+                chunk: "5, nil, false, 'Hello'",
+                expected_return_values: vec!["5", "nil", "false", "Hello"],
+            }
         ],
         expected_print_values: vec![],
     };
