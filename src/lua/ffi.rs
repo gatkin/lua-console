@@ -13,7 +13,7 @@ use libc;
 const LUAI_MAXSTACK: c_int = 1000000;
 pub const LUA_MULTRET: c_int = -1;
 pub const LUA_OK: c_int = 0;
-pub const LUA_ERRUN: c_int = 2;
+pub const LUA_ERRYIELD: c_int = 1;
 pub const LUA_REGISTRYINDEX: c_int = (-LUAI_MAXSTACK) - 1000;
 pub const LUA_RIDX_GLOBALS: c_int = 2;
 
@@ -113,6 +113,10 @@ pub unsafe fn lua_pushglobaltable(L: *mut lua_State) {
 pub unsafe fn lua_remove(L: *mut lua_State, idx: c_int) {
     lua_rotate(L, idx, -1);
     lua_pop(L, 1);
+}
+
+pub unsafe fn lua_tostring(L: *mut lua_State, i: c_int) -> *const c_char {
+    lua_tolstring(L, i, ptr::null_mut())
 }
 
 pub fn lua_upvalueindex(i: c_int) -> c_int {

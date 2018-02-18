@@ -51,8 +51,8 @@ pub struct LuaState {
 /// Represents errors executing and compiling Lua chunks.
 #[derive(PartialEq, Debug)]
 pub struct LuaError {
-    status: LuaErrorStatus,
-    message: String,
+    pub status: LuaErrorStatus,
+    pub message: String,
 }
 
 
@@ -228,23 +228,9 @@ unsafe fn dump_stack(L: *mut lua_State, num_values: i32) -> Vec<String> {
 }
 
 
-/// Retrives the value at the top of the stack and converts it to a string representation.
-unsafe fn dump_stack_top(L: *mut lua_State) -> String {
-    push_global(L, "tostring");
-    lua_pushvalue(L, -2);
-    lua_call(L, 1, 1);
-    let value = stack_top_to_string(L);
-
-    lua_pop(L, 1);
-
-    value
-}
-
-
 /// Retrieves all error information from the stack after an error is encountered in either the compiliation
 /// or execution of a chunk.
 unsafe fn get_execution_error(L: *mut lua_State, rcode: LuaRcode) -> LuaError {
-
     let error_status = match rcode {
         LuaRcode::Yield => LuaErrorStatus::Yield,
         LuaRcode::ErrSyntax => LuaErrorStatus::SyntaxError,
@@ -252,9 +238,10 @@ unsafe fn get_execution_error(L: *mut lua_State, rcode: LuaRcode) -> LuaError {
         _ => LuaErrorStatus::InternalError,
     };
 
+
     LuaError {
         status: error_status,
-        message: dump_stack_top(L),
+        message: stack_top_to_string(L),
     }
 }
 
@@ -262,9 +249,9 @@ unsafe fn get_execution_error(L: *mut lua_State, rcode: LuaRcode) -> LuaError {
 /// Custom message handler invoked by the Lua runtime whenever an error is encountered
 /// executing a chunk.
 unsafe extern "C" fn message_handler(L: *mut lua_State) -> c_int {
-    let msg = lua_tolstring(L, 1, ptr::null_mut());
+    let msg = lua_tostring(L, 1);
     luaL_traceback(L, L, msg, 1); // Append a traceback to the message
-    LUA_ERRUN
+    LUA_ERRYIELD
 }
 
 
@@ -312,7 +299,7 @@ unsafe extern "C" fn print(L: *mut lua_State) -> c_int {
 
 /// Retrieves the string from the top of the stack.
 unsafe fn stack_top_to_string(L: *mut lua_State) -> String {
-    let raw_value = lua_tolstring(L, -1, ptr::null_mut());
+    let raw_value = lua_tostring(L, -1);
     String::from(CStr::from_ptr(raw_value).to_str().unwrap())
 }
 
