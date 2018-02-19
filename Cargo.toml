@@ -8,3 +8,4 @@ cc = "1.0"
 
 [dependencies]
 libc = "0.2"
+termion = "1.5.1"
