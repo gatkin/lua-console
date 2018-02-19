@@ -104,17 +104,35 @@ impl Repl {
     }
 
     fn on_go_back_in_history(&mut self) -> Cmd {
-        // TODO
+        let input_index = self.input_history_index.unwrap_or(self.inputs.len());
+        if input_index > 0 {
+            self.input_history_index = Some(input_index - 1);
+            self.input_buffer.clear();
+            self.input_buffer = self.inputs[input_index - 1].clone();
+        }
+
         Cmd::None
     }
 
     fn on_go_forward_in_history(&mut self) -> Cmd {
-        // TODO
+        if let Some(index) = self.input_history_index {
+            let next_index = index + 1;
+            if next_index < self.inputs.len() {
+                self.input_history_index = Some(next_index);
+                self.input_buffer.clear();
+                self.input_buffer = self.inputs[next_index].clone();
+            } else {
+                self.input_buffer.clear();
+                self.input_history_index = None;
+            }
+        }
+
         Cmd::None
     }
 
     fn on_reset_input(&mut self) -> Cmd {
         self.input_buffer.clear();
+        self.input_history_index = None;
         Cmd::None
     }
 
@@ -124,7 +142,9 @@ impl Repl {
 
     fn on_submit(&mut self) -> Cmd {
         let chunk = self.input_buffer.clone();
+        self.inputs.push(self.input_buffer.clone());
         self.input_buffer.clear();
+        self.input_history_index = None;
         Cmd::ExecuteChunk(chunk)
     }
 
